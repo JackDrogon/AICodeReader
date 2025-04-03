@@ -55,6 +55,10 @@ func test_standard_request(config Config) {
 		log.Printf("ChatCompletion error: %v\n", err)
 		return
 	}
+	fmt.Println("----- 推理过程  -----")
+	fmt.Println(resp.Choices[0].Message.ReasoningContent)
+
+	fmt.Println("----- 最终回答 -----")
 	fmt.Println(resp.Choices[0].Message.Content)
 }
 
@@ -80,6 +84,8 @@ func test_stream_request(config Config) {
 					Content: "常见的十字花科植物有哪些？",
 				},
 			},
+			Temperature: 0.7,
+			Stream:      true,
 		},
 	)
 	if err != nil {
@@ -87,6 +93,8 @@ func test_stream_request(config Config) {
 		return
 	}
 	defer stream.Close()
+
+	isThinking := false
 
 	for {
 		recv, err := stream.Recv()
@@ -100,7 +108,28 @@ func test_stream_request(config Config) {
 		}
 
 		if len(recv.Choices) > 0 {
-			fmt.Print(recv.Choices[0].Delta.Content)
+			if recv.Choices[0].Delta.ToolCalls != nil ||
+				(recv.Choices[0].Delta.Role == "assistant" && !isThinking) {
+				if !isThinking {
+					fmt.Println("----- 模型思考过程 -----")
+					isThinking = true
+				}
+
+				if recv.Choices[0].Delta.ToolCalls != nil {
+					for _, toolCall := range recv.Choices[0].Delta.ToolCalls {
+						if toolCall.Function.Arguments != "" {
+							fmt.Print(toolCall.Function.Arguments)
+						}
+					}
+				}
+			} else if recv.Choices[0].Delta.Content != "" {
+				if isThinking {
+					log.Println("----- 模型最终回答 -----")
+					isThinking = false
+				}
+
+				fmt.Print(recv.Choices[0].Delta.Content)
+			}
 		}
 	}
 }
@@ -109,5 +138,5 @@ func main() {
 	config := LoadConfig()
 
 	test_standard_request(config)
-	test_stream_request(config)
+	// test_stream_request(config)
 }
