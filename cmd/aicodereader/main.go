@@ -2,12 +2,18 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
 
 	"github.com/sashabaranov/go-openai"
+)
+
+// flags for cli
+var (
+	filename = flag.String("f", "", "path to the file to read")
 )
 
 type Config struct {
@@ -135,6 +141,22 @@ func test_stream_request(config Config) {
 }
 
 func main() {
+	flag.Parse()
+
+	if *filename == "" {
+		fmt.Println("filename is required")
+		flag.Usage()
+		return
+	}
+
+	content, err := os.ReadFile(*filename)
+	if err != nil {
+		log.Fatalf("failed to read file: %v", err)
+		return
+	}
+
+	fmt.Println(string(content))
+
 	config := LoadConfig()
 
 	test_standard_request(config)
