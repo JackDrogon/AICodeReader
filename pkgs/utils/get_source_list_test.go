@@ -301,6 +301,77 @@ func (suite *EmptyDirectoryTestSuite) TestEmptyDirectory() {
 	suite.Empty(files, "Empty directory should return no files")
 }
 
+// TestWithNonExistentDirectory tests behavior when directory doesn't exist.
+func (suite *GetSourceListTestSuite) TestWithNonExistentDirectory() {
+	nonExistentDir := filepath.Join(suite.tempDir, "non_existent_directory")
+
+	options := &GetSourceListOptions{
+		RespectGitignore: true,
+		IncludeHidden:    false,
+	}
+
+	files, err := GetSourceList(nonExistentDir, options)
+	suite.Error(err, "Should return error when directory doesn't exist")
+	suite.Empty(files, "Should return empty slice when directory doesn't exist")
+}
+
+// TestWithGitDirectory tests that .git directories are skipped during traversal.
+func (suite *GetSourceListTestSuite) TestWithGitDirectory() {
+	// Create a project directory structure
+	projectDir := filepath.Join(suite.tempDir, "project")
+	err := os.Mkdir(projectDir, 0755)
+	suite.Require().NoError(err, "Failed to create project directory")
+
+	// Create some normal files
+	normalFile := filepath.Join(projectDir, "main.go")
+	err = os.WriteFile(normalFile, []byte("package main"), 0644)
+	suite.Require().NoError(err, "Failed to create normal file")
+
+	// Create a .git directory with some contents
+	gitDir := filepath.Join(projectDir, ".git")
+	err = os.Mkdir(gitDir, 0755)
+	suite.Require().NoError(err, "Failed to create .git directory")
+
+	// Create some files inside .git directory
+	gitConfigFile := filepath.Join(gitDir, "config")
+	err = os.WriteFile(gitConfigFile, []byte("git config content"), 0644)
+	suite.Require().NoError(err, "Failed to create git config file")
+
+	gitObjectsDir := filepath.Join(gitDir, "objects")
+	err = os.Mkdir(gitObjectsDir, 0755)
+	suite.Require().NoError(err, "Failed to create git objects directory")
+
+	gitObjectFile := filepath.Join(gitObjectsDir, "somehash")
+	err = os.WriteFile(gitObjectFile, []byte("git object content"), 0644)
+	suite.Require().NoError(err, "Failed to create git object file")
+
+	options := &GetSourceListOptions{
+		RespectGitignore: false,
+		IncludeHidden:    false,
+	}
+
+	files, err := GetSourceList(projectDir, options)
+	suite.Require().NoError(err, "GetSourceList failed")
+
+	// Should only have the normal file, not any files from .git directory
+	suite.Len(files, 1, "Should only have one file (excluding .git contents)")
+
+	// Verify the file contains what we expect (main.go but not any .git files)
+	hasMainGo := false
+	hasGitFiles := false
+	for _, file := range files {
+		if strings.Contains(file, "main.go") {
+			hasMainGo = true
+		}
+		if strings.Contains(file, ".git") {
+			hasGitFiles = true
+		}
+	}
+
+	suite.True(hasMainGo, "Should contain main.go file")
+	suite.False(hasGitFiles, "Should not contain any files from .git directory")
+}
+
 // TestGetSourceList runs all the test suites.
 func TestGetSourceList(t *testing.T) {
 	suite.Run(t, new(GetSourceListTestSuite))
