@@ -1,0 +1,25 @@
+repos:
+  # Basic file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+
+  # Run the full CI pipeline via Makefile
+  - repo: local
+    hooks:
+      - id: ci-check
+        name: Run CI checks via Makefile
+        entry: make ci
+        language: system
+        pass_filenames: false
+        always_run: true
+
+# Configuration
+fail_fast: true
+default_stages: [pre-commit]
+minimum_pre_commit_version: "3.0.0"
