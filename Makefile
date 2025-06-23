@@ -15,7 +15,6 @@ GOFLAGS=
 ifeq ($(COVERAGE),ON)
     GOFLAGS += -cover
 endif
-
 .PHONY: default
 ## default: Build aicodereader
 default: aicodereader
@@ -25,7 +24,6 @@ default: aicodereader
 build: aicodereader
 
 .PHONY: bin
-## bin : Create bin directory
 bin:
 	$(V)mkdir -p bin
 
@@ -63,6 +61,8 @@ check-fmt:
 		gofmt -s -l .; \
 		echo "Please run 'make fmt' to format your code."; \
 		exit 1; \
+	else \
+		echo "All code is formatted correctly."; \
 	fi
 
 .PHONY: cloc
@@ -84,12 +84,8 @@ check-env:
 ## help : Print help message
 help: Makefile
 	@sed -n 's/^##//p' $< | awk 'BEGIN {FS = ":"} {printf "\033[36m%-23s\033[0m %s\n", $$1, $$2}'
-
-
-
 # --------------- ------------------ ---------------
 # --------------- User Defined Tasks ---------------
-
 .PHONY: aicodereader
 ## aicodereader : Build project
 aicodereader: bin
