@@ -17,6 +17,9 @@ type GetSourceListOptions struct {
 	// Extensions list of file extensions to include (e.g., []string{".go", ".js"})
 	// If empty, all files are included
 	Extensions []string
+	// GitignoreFilePath custom path to .gitignore file
+	// If empty and RespectGitignore is true, will use .gitignore in the target directory
+	GitignoreFilePath string
 }
 
 // GetSourceList returns a list of file paths in the given directory,
@@ -34,7 +37,16 @@ func GetSourceList(dir string, options *GetSourceListOptions) ([]string, error) 
 
 	// Load .gitignore rules if requested
 	if options.RespectGitignore {
-		gitignorePath := filepath.Join(dir, ".gitignore")
+		var gitignorePath string
+
+		if options.GitignoreFilePath != "" {
+			// Use custom gitignore file path
+			gitignorePath = options.GitignoreFilePath
+		} else {
+			// Use default .gitignore in the target directory
+			gitignorePath = filepath.Join(dir, ".gitignore")
+		}
+
 		gitIgnore, err = ignore.CompileIgnoreFile(gitignorePath)
 		if err != nil {
 			// If .gitignore file doesn't exist or can't be read, create an empty GitIgnore
@@ -72,7 +84,7 @@ func GetSourceList(dir string, options *GetSourceListOptions) ([]string, error) 
 		}
 
 		// Check against gitignore rules if enabled
-		if options.RespectGitignore && gitIgnore != nil {
+		if gitIgnore != nil {
 			// Convert to relative path from the directory
 			relPath, err := filepath.Rel(dir, path)
 			if err != nil {
