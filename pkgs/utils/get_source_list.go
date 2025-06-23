@@ -8,22 +8,80 @@ import (
 	ignore "github.com/sabhiram/go-gitignore"
 )
 
-// GetSourceListOptions represents options for GetSourceList function.
+// GetSourceListOptions represents configuration options for the GetSourceList function.
+// It provides fine-grained control over file discovery behavior.
 type GetSourceListOptions struct {
-	// RespectGitignore whether to respect .gitignore rules
+	// RespectGitignore determines whether to respect .gitignore rules during file discovery.
+	// When true, files matching .gitignore patterns will be excluded from the results.
+	// When false, all files (subject to other filters) will be included regardless of .gitignore rules.
 	RespectGitignore bool
-	// IncludeHidden whether to include hidden files (starting with .)
+
+	// IncludeHidden determines whether to include hidden files (files starting with '.').
+	// When true, hidden files like .env, .config, etc. will be included in the results.
+	// When false, hidden files will be filtered out.
+	// Note: .git directories are always excluded regardless of this setting.
 	IncludeHidden bool
-	// Extensions list of file extensions to include (e.g., []string{".go", ".js"})
-	// If empty, all files are included
+
+	// Extensions specifies a list of file extensions to include in the results.
+	// Only files with extensions matching this list will be returned.
+	// Extensions should include the dot prefix (e.g., []string{".go", ".js", ".py"}).
+	// If empty or nil, all file extensions will be included (subject to other filters).
 	Extensions []string
-	// GitignoreFilePath custom path to .gitignore file
-	// If empty and RespectGitignore is true, will use .gitignore in the target directory
+
+	// GitignoreFilePath specifies a custom path to a .gitignore file.
+	// When RespectGitignore is true:
+	//   - If GitignoreFilePath is empty: uses .gitignore in the target directory (dir parameter)
+	//   - If GitignoreFilePath is set: uses the specified .gitignore file path
+	//   - If the specified file doesn't exist: silently continues without gitignore rules
+	// When RespectGitignore is false: this field is ignored.
 	GitignoreFilePath string
 }
 
-// GetSourceList returns a list of file paths in the given directory,
-// optionally respecting .gitignore rules.
+// GetSourceList recursively scans a directory and returns a list of file paths
+// that match the specified criteria. It provides flexible filtering options
+// including gitignore support, file extension filtering, and hidden file handling.
+//
+// Parameters:
+//   - dir: The root directory path to scan. Can be absolute or relative path.
+//   - options: Configuration options for filtering behavior. If nil, uses default settings:
+//     RespectGitignore=true, IncludeHidden=false, Extensions=nil, GitignoreFilePath=""
+//
+// Returns:
+//   - []string: A slice of file paths that match the specified criteria.
+//     Paths are returned as provided by filepath.WalkDir (absolute if dir is absolute).
+//   - error: An error if directory traversal fails or other filesystem errors occur.
+//     Gitignore file read errors are handled gracefully and don't cause function failure.
+//
+// Behavior:
+//   - Always excludes .git directories from traversal for performance
+//   - Respects gitignore rules when RespectGitignore=true
+//   - Filters by file extensions when Extensions is specified
+//   - Filters hidden files when IncludeHidden=false
+//   - Returns empty slice (not nil) when no files match criteria
+//
+// Example usage:
+//
+//	// Get all Go files respecting .gitignore
+//	options := &GetSourceListOptions{
+//		RespectGitignore: true,
+//		Extensions:       []string{".go"},
+//	}
+//	files, err := GetSourceList("./src", options)
+//
+//	// Get all files including hidden ones, no gitignore
+//	options := &GetSourceListOptions{
+//		RespectGitignore: false,
+//		IncludeHidden:    true,
+//	}
+//	files, err := GetSourceList(".", options)
+//
+//	// Use custom gitignore file
+//	options := &GetSourceListOptions{
+//		RespectGitignore:  true,
+//		GitignoreFilePath: "/path/to/custom/.gitignore",
+//		Extensions:        []string{".js", ".ts"},
+//	}
+//	files, err := GetSourceList("./project", options)
 func GetSourceList(dir string, options *GetSourceListOptions) ([]string, error) {
 	if options == nil {
 		options = &GetSourceListOptions{
@@ -106,6 +164,7 @@ func GetSourceList(dir string, options *GetSourceListOptions) ([]string, error) 
 }
 
 // contains checks if a slice contains a specific string.
+// This is a utility function used internally by GetSourceList.
 func contains(slice []string, item string) bool {
 	for _, s := range slice {
 		if s == item {
