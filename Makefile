@@ -80,10 +80,18 @@ todos:
 check-env:
 	$(V)bash scripts/check-dev-env.sh
 
+.PHONY: check-pre-commit
+## check-pre-commit : Check pre-commit
+check-pre-commit:
+	$(V)pre-commit run --all-files
+
 .PHONY: help
 ## help : Print help message
 help: Makefile
 	@sed -n 's/^##//p' $< | awk 'BEGIN {FS = ":"} {printf "\033[36m%-23s\033[0m %s\n", $$1, $$2}'
+
+
+
 # --------------- ------------------ ---------------
 # --------------- User Defined Tasks ---------------
 .PHONY: aicodereader
