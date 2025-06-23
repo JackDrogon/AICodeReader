@@ -50,6 +50,7 @@ linters:
           allow:
             - $gostd
             - github.com/sashabaranov/go-openai
+            - github.com/sabhiram/go-gitignore
     errorlint:
       errorf: true
       errorf-multi: true

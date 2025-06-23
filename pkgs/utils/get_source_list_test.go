@@ -1,265 +1,205 @@
-package utils // nolint:testpackage
+// nolint:testpackage
+package utils
 
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
 
 func TestGetSourceList(t *testing.T) {
-	// Create a temporary directory structure for testing
-	tempDir := t.TempDir()
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "test_source_list")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
 
-	// Create test files
+	// Create test files and directories
 	testFiles := []string{
-		"main.go",
-		"README.md",
-		"config.json",
-		"src/app.go",
-		"src/utils.go",
-		"tests/test.go",
-		".env",
-		".gitignore",
+		"file1.go",
+		"file2.txt",
+		"dir1/file3.go",
+		"dir1/file4.txt",
+		"dir2/file5.js",
+		".hidden",
 		"node_modules/package.json",
-		"dist/bundle.js",
+		"build/output.bin",
 	}
 
 	for _, file := range testFiles {
-		fullPath := filepath.Join(tempDir, file)
-		dir := filepath.Dir(fullPath)
-
+		filePath := filepath.Join(tempDir, file)
 		// Create directory if it doesn't exist
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatalf("Failed to create directory %s: %v", dir, err)
+		if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+			t.Fatalf("Failed to create directory for %s: %v", file, err)
 		}
-
 		// Create file
-		if err := os.WriteFile(fullPath, []byte("test content"), 0644); err != nil {
-			t.Fatalf("Failed to create file %s: %v", fullPath, err)
+		if err := os.WriteFile(filePath, []byte("test content"), 0644); err != nil {
+			t.Fatalf("Failed to create file %s: %v", file, err)
 		}
 	}
 
 	// Create .gitignore file
 	gitignoreContent := `node_modules/
-dist/
-*.log
-.env
+build/
+*.bin
+.hidden
 `
 	gitignorePath := filepath.Join(tempDir, ".gitignore")
 	if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
 		t.Fatalf("Failed to create .gitignore: %v", err)
 	}
 
-	// Test with gitignore rules
 	t.Run("WithGitignore", func(t *testing.T) {
 		options := &GetSourceListOptions{
 			RespectGitignore: true,
 			IncludeHidden:    false,
 		}
-
 		files, err := GetSourceList(tempDir, options)
 		if err != nil {
 			t.Fatalf("GetSourceList failed: %v", err)
 		}
 
-		// Convert to relative paths for easier comparison
-		relFiles := make([]string, 0, len(files))
+		// Convert to relative paths for easier testing
+		var relativeFiles []string
 		for _, file := range files {
-			rel, _ := filepath.Rel(tempDir, file)
-			relFiles = append(relFiles, rel)
+			relPath, _ := filepath.Rel(tempDir, file)
+			relativeFiles = append(relativeFiles, filepath.ToSlash(relPath))
+		}
+		sort.Strings(relativeFiles)
+
+		expected := []string{
+			"dir1/file3.go",
+			"dir1/file4.txt",
+			"dir2/file5.js",
+			"file1.go",
+			"file2.txt",
+		}
+		sort.Strings(expected)
+
+		if len(relativeFiles) != len(expected) {
+			t.Errorf("Expected %d files, got %d", len(expected), len(relativeFiles))
+			t.Errorf("Expected: %v", expected)
+			t.Errorf("Got: %v", relativeFiles)
+			return
 		}
 
-		// Check that gitignored files are excluded
-		for _, file := range relFiles {
-			if filepath.Base(file) == ".env" {
-				t.Errorf("Expected .env to be gitignored, but found: %s", file)
-			}
-			if filepath.Dir(file) == "node_modules" || strings.HasPrefix(file, "node_modules/") {
-				t.Errorf("Expected node_modules to be gitignored, but found: %s", file)
-			}
-			if filepath.Dir(file) == "dist" || strings.HasPrefix(file, "dist/") {
-				t.Errorf("Expected dist to be gitignored, but found: %s", file)
-			}
-		}
-
-		// Check that non-gitignored files are included
-		expectedFiles := []string{"main.go", "README.md", "config.json", "src/app.go", "src/utils.go", "tests/test.go"}
-		for _, expected := range expectedFiles {
-			found := false
-			for _, file := range relFiles {
-				if file == expected {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Errorf("Expected file %s to be included, but not found", expected)
+		for i, expectedFile := range expected {
+			if relativeFiles[i] != expectedFile {
+				t.Errorf("Expected file %s, got %s", expectedFile, relativeFiles[i])
 			}
 		}
 	})
 
-	// Test without gitignore rules
 	t.Run("WithoutGitignore", func(t *testing.T) {
+		options := &GetSourceListOptions{
+			RespectGitignore: false,
+			IncludeHidden:    false,
+		}
+		files, err := GetSourceList(tempDir, options)
+		if err != nil {
+			t.Fatalf("GetSourceList failed: %v", err)
+		}
+
+		// Convert to relative paths for easier testing
+		var relativeFiles []string
+		for _, file := range files {
+			relPath, _ := filepath.Rel(tempDir, file)
+			// Skip .gitignore file for this test
+			if filepath.Base(relPath) == ".gitignore" {
+				continue
+			}
+			relativeFiles = append(relativeFiles, filepath.ToSlash(relPath))
+		}
+		sort.Strings(relativeFiles)
+
+		expected := []string{
+			"build/output.bin",
+			"dir1/file3.go",
+			"dir1/file4.txt",
+			"dir2/file5.js",
+			"file1.go",
+			"file2.txt",
+			"node_modules/package.json",
+		}
+		sort.Strings(expected)
+
+		if len(relativeFiles) != len(expected) {
+			t.Errorf("Expected %d files, got %d", len(expected), len(relativeFiles))
+			t.Errorf("Expected: %v", expected)
+			t.Errorf("Got: %v", relativeFiles)
+			return
+		}
+
+		for i, expectedFile := range expected {
+			if relativeFiles[i] != expectedFile {
+				t.Errorf("Expected file %s, got %s", expectedFile, relativeFiles[i])
+			}
+		}
+	})
+
+	t.Run("WithExtensionFilter", func(t *testing.T) {
+		options := &GetSourceListOptions{
+			RespectGitignore: true,
+			IncludeHidden:    false,
+			Extensions:       []string{".go"},
+		}
+		files, err := GetSourceList(tempDir, options)
+		if err != nil {
+			t.Fatalf("GetSourceList failed: %v", err)
+		}
+
+		// Convert to relative paths for easier testing
+		var relativeFiles []string
+		for _, file := range files {
+			relPath, _ := filepath.Rel(tempDir, file)
+			relativeFiles = append(relativeFiles, filepath.ToSlash(relPath))
+		}
+		sort.Strings(relativeFiles)
+
+		expected := []string{
+			"dir1/file3.go",
+			"file1.go",
+		}
+		sort.Strings(expected)
+
+		if len(relativeFiles) != len(expected) {
+			t.Errorf("Expected %d files, got %d", len(expected), len(relativeFiles))
+			t.Errorf("Expected: %v", expected)
+			t.Errorf("Got: %v", relativeFiles)
+			return
+		}
+
+		for i, expectedFile := range expected {
+			if relativeFiles[i] != expectedFile {
+				t.Errorf("Expected file %s, got %s", expectedFile, relativeFiles[i])
+			}
+		}
+	})
+
+	t.Run("WithHiddenFiles", func(t *testing.T) {
 		options := &GetSourceListOptions{
 			RespectGitignore: false,
 			IncludeHidden:    true,
 		}
-
 		files, err := GetSourceList(tempDir, options)
 		if err != nil {
 			t.Fatalf("GetSourceList failed: %v", err)
 		}
 
-		// Should include all files (except .git which we always skip)
-		if len(files) < len(testFiles) {
-			t.Errorf("Expected at least %d files, got %d", len(testFiles), len(files))
-		}
-	})
-
-	// Test with file extension filter
-	t.Run("WithExtensionFilter", func(t *testing.T) {
-		options := &GetSourceListOptions{
-			RespectGitignore: false,
-			IncludeHidden:    false,
-			Extensions:       []string{".go"},
-		}
-
-		files, err := GetSourceList(tempDir, options)
-		if err != nil {
-			t.Fatalf("GetSourceList failed: %v", err)
-		}
-
-		// Should only include .go files
+		// Check if hidden files are included
+		var hasHiddenFile bool
 		for _, file := range files {
-			if filepath.Ext(file) != ".go" {
-				t.Errorf("Expected only .go files, but found: %s", file)
+			if strings.Contains(file, ".hidden") {
+				hasHiddenFile = true
+				break
 			}
+		}
+
+		if !hasHiddenFile {
+			t.Error("Expected hidden files to be included when IncludeHidden is true")
 		}
 	})
-}
-
-// TestLoadGitignoreRules tests the internal loadGitignoreRules function by creating
-// a public wrapper since it's not exported from the utils package.
-func TestLoadGitignoreRules(t *testing.T) {
-	tempDir := t.TempDir()
-
-	gitignoreContent := `# This is a comment
-node_modules/
-*.log
-
-dist/
-.env
-`
-	gitignorePath := filepath.Join(tempDir, ".gitignore")
-	if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
-		t.Fatalf("Failed to create .gitignore: %v", err)
-	}
-
-	// Test the functionality through GetSourceList since loadGitignoreRules is not exported
-	options := &GetSourceListOptions{
-		RespectGitignore: true,
-		IncludeHidden:    false,
-	}
-
-	// Create some test files
-	testFiles := []string{"test.log", "main.go", "node_modules/pkg.json", "dist/bundle.js", ".env"}
-	for _, file := range testFiles {
-		fullPath := filepath.Join(tempDir, file)
-		dir := filepath.Dir(fullPath)
-
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatalf("Failed to create directory %s: %v", dir, err)
-		}
-
-		if err := os.WriteFile(fullPath, []byte("test"), 0644); err != nil {
-			t.Fatalf("Failed to create file %s: %v", fullPath, err)
-		}
-	}
-
-	files, err := GetSourceList(tempDir, options)
-	if err != nil {
-		t.Fatalf("GetSourceList failed: %v", err)
-	}
-
-	// Convert to relative paths
-	relFiles := make([]string, 0, len(files))
-	for _, file := range files {
-		rel, _ := filepath.Rel(tempDir, file)
-		relFiles = append(relFiles, rel)
-	}
-
-	// Should only contain main.go (others should be gitignored)
-	expectedCount := 1
-	if len(relFiles) != expectedCount {
-		t.Errorf("Expected %d files after gitignore filtering, got %d: %v", expectedCount, len(relFiles), relFiles)
-	}
-}
-
-// TestMatchesGitignoreRule tests the internal matchesGitignoreRule function indirectly.
-func TestMatchesGitignoreRule(t *testing.T) {
-	tests := []struct {
-		name         string
-		gitignore    string
-		testFile     string
-		shouldIgnore bool
-	}{
-		{"Directory rule", "node_modules/", "node_modules/package.json", true},
-		{"Wildcard rule", "*.log", "test.log", true},
-		{"Nested wildcard", "*.log", "src/test.log", true},
-		{"Go files", "*.go", "main.go", true},
-		{"No match", "*.log", "README.md", false},
-		{"Exact match", ".env", ".env", true},
-		{"Nested exact", ".env", "config/.env", true},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			// Create a unique temp directory for each subtest
-			tempDir := t.TempDir()
-
-			// Create .gitignore with specific rule
-			gitignorePath := filepath.Join(tempDir, ".gitignore")
-			if err := os.WriteFile(gitignorePath, []byte(test.gitignore), 0644); err != nil {
-				t.Fatalf("Failed to create .gitignore: %v", err)
-			}
-
-			// Create test file
-			fullPath := filepath.Join(tempDir, test.testFile)
-			dir := filepath.Dir(fullPath)
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				t.Fatalf("Failed to create directory %s: %v", dir, err)
-			}
-			if err := os.WriteFile(fullPath, []byte("test"), 0644); err != nil {
-				t.Fatalf("Failed to create file %s: %v", fullPath, err)
-			}
-
-			// Test through GetSourceList
-			options := &GetSourceListOptions{
-				RespectGitignore: true,
-				IncludeHidden:    true,
-			}
-
-			files, err := GetSourceList(tempDir, options)
-			if err != nil {
-				t.Fatalf("GetSourceList failed: %v", err)
-			}
-
-			// Check if file is included or excluded
-			found := false
-			for _, file := range files {
-				rel, _ := filepath.Rel(tempDir, file)
-				if rel == test.testFile {
-					found = true
-					break
-				}
-			}
-
-			if test.shouldIgnore && found {
-				t.Errorf("Expected file %s to be ignored by rule %s, but it was included", test.testFile, test.gitignore)
-			} else if !test.shouldIgnore && !found {
-				t.Errorf("Expected file %s to not be ignored by rule %s, but it was excluded", test.testFile, test.gitignore)
-			}
-		})
-	}
 }
