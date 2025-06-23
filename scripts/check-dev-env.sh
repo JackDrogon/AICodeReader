@@ -34,7 +34,7 @@ check_go_version() {
         version=$(go version | cut -d' ' -f3)
         echo -e "${GREEN}✅ Go is installed${NC}"
         echo -e "   ${YELLOW}Version: $version${NC}"
-        
+
         # Check if it's Go 1.24.x
         if [[ $version == go1.24* ]]; then
             echo -e "   ${GREEN}✅ Go version is compatible${NC}"
@@ -116,4 +116,4 @@ else
     echo ""
     echo -e "${YELLOW}Please fix the issues above before running CI commands.${NC}"
     exit 1
-fi 
+fi

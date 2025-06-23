@@ -25,7 +25,7 @@
 
 #### 复杂度控制
 - **cyclomatic complexity**: 最大20
-- **cognitive complexity**: 最大40  
+- **cognitive complexity**: 最大40
 - **function length**: 最大100行，50语句
 - **nested if complexity**: 最大15
 
@@ -100,4 +100,4 @@ golangci-lint migrate
 
 - [golangci-lint v2迁移指南](https://golangci-lint.run/product/migration-guide/)
 - [golangci-lint v2新功能](https://ldez.github.io/blog/2025/03/23/golangci-lint-v2/)
-- [配置参考](https://golangci-lint.run/usage/configuration/) 
+- [配置参考](https://golangci-lint.run/usage/configuration/)
