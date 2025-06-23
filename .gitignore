@@ -1,2 +1,10 @@
 .envrc
 bin
+
+# Test coverage reports
+coverage.out
+coverage.html
+
+# Temporary files
+*.tmp
+*.temp
