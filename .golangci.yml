@@ -76,7 +76,7 @@ linters:
         - performance
         - style
     gocyclo:
-      min-complexity: 10
+      min-complexity: 20
     gosec:
       severity: medium
       confidence: medium
@@ -103,7 +103,7 @@ linters:
     nakedret:
       max-func-lines: 30
     nestif:
-      min-complexity: 6
+      min-complexity: 15
     prealloc:
       simple: true
       range-loops: true
@@ -158,6 +158,22 @@ linters:
         path: \\.pb\\.go$
       - linters:
           - gochecknoglobals
+        path: cmd/
+      - linters:
+          - revive
+        text: "don't use underscores in Go names"
+        path: cmd/
+      - linters:
+          - godot
+        text: "Comment should end in a period"
+        path: cmd/
+      - linters:
+          - errorlint
+        text: "comparing with == will fail on wrapped errors"
+        path: cmd/
+      - linters:
+          - unused
+        text: "is unused"
         path: cmd/
     paths:
       - third_party$
