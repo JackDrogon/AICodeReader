@@ -7,17 +7,22 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/suite"
 )
 
-// setupTestEnvironment creates a temporary directory with test files and returns the temp dir path.
-func setupTestEnvironment(t *testing.T) string {
-	t.Helper()
+// GetSourceListTestSuite defines the test suite for GetSourceList function.
+type GetSourceListTestSuite struct {
+	suite.Suite
+	tempDir string
+}
 
+// SetupTest is called before each test method, creating a fresh test environment.
+func (suite *GetSourceListTestSuite) SetupTest() {
 	// Create a temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "test_source_list")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
+	suite.Require().NoError(err, "Failed to create temp dir")
+	suite.tempDir = tempDir
 
 	// Create test files and directories
 	testFiles := []string{
@@ -32,15 +37,13 @@ func setupTestEnvironment(t *testing.T) string {
 	}
 
 	for _, file := range testFiles {
-		filePath := filepath.Join(tempDir, file)
+		filePath := filepath.Join(suite.tempDir, file)
 		// Create directory if it doesn't exist
-		if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
-			t.Fatalf("Failed to create directory for %s: %v", file, err)
-		}
+		dirErr := os.MkdirAll(filepath.Dir(filePath), 0755)
+		suite.Require().NoError(dirErr, "Failed to create directory for %s", file)
 		// Create file
-		if err := os.WriteFile(filePath, []byte("test content"), 0644); err != nil {
-			t.Fatalf("Failed to create file %s: %v", file, err)
-		}
+		fileErr := os.WriteFile(filePath, []byte("test content"), 0644)
+		suite.Require().NoError(fileErr, "Failed to create file %s", file)
 	}
 
 	// Create .gitignore file
@@ -49,24 +52,24 @@ build/
 *.bin
 .hidden
 `
-	gitignorePath := filepath.Join(tempDir, ".gitignore")
-	if err := os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644); err != nil {
-		t.Fatalf("Failed to create .gitignore: %v", err)
-	}
+	gitignorePath := filepath.Join(suite.tempDir, ".gitignore")
+	err = os.WriteFile(gitignorePath, []byte(gitignoreContent), 0644)
+	suite.Require().NoError(err, "Failed to create .gitignore")
+}
 
-	return tempDir
+// TearDownTest is called after each test method, cleaning up the test environment.
+func (suite *GetSourceListTestSuite) TearDownTest() {
+	if suite.tempDir != "" {
+		os.RemoveAll(suite.tempDir)
+	}
 }
 
 // getRelativeFiles converts absolute file paths to relative paths for easier testing.
-func getRelativeFiles(t *testing.T, tempDir string, files []string, skipGitignore bool) []string {
-	t.Helper()
-
+func (suite *GetSourceListTestSuite) getRelativeFiles(files []string, skipGitignore bool) []string {
 	relativeFiles := make([]string, 0, len(files))
 	for _, file := range files {
-		relPath, err := filepath.Rel(tempDir, file)
-		if err != nil {
-			t.Fatalf("Failed to get relative path for %s: %v", file, err)
-		}
+		relPath, err := filepath.Rel(suite.tempDir, file)
+		suite.Require().NoError(err, "Failed to get relative path for %s", file)
 		// Skip gitignore files if requested
 		if skipGitignore && strings.HasSuffix(relPath, ".gitignore") {
 			continue
@@ -77,21 +80,16 @@ func getRelativeFiles(t *testing.T, tempDir string, files []string, skipGitignor
 	return relativeFiles
 }
 
-// TestGetSourceList_WithGitignore tests file discovery with gitignore rules enabled.
-func TestGetSourceList_WithGitignore(t *testing.T) {
-	tempDir := setupTestEnvironment(t)
-	defer os.RemoveAll(tempDir)
-
+// TestWithGitignore tests file discovery with gitignore rules enabled.
+func (suite *GetSourceListTestSuite) TestWithGitignore() {
 	options := &GetSourceListOptions{
 		RespectGitignore: true,
 		IncludeHidden:    false,
 	}
-	files, err := GetSourceList(tempDir, options)
-	if err != nil {
-		t.Fatalf("GetSourceList failed: %v", err)
-	}
+	files, err := GetSourceList(suite.tempDir, options)
+	suite.Require().NoError(err, "GetSourceList failed")
 
-	relativeFiles := getRelativeFiles(t, tempDir, files, false)
+	relativeFiles := suite.getRelativeFiles(files, false)
 
 	expected := []string{
 		"dir1/file3.go",
@@ -102,35 +100,19 @@ func TestGetSourceList_WithGitignore(t *testing.T) {
 	}
 	sort.Strings(expected)
 
-	if len(relativeFiles) != len(expected) {
-		t.Errorf("Expected %d files, got %d", len(expected), len(relativeFiles))
-		t.Errorf("Expected: %v", expected)
-		t.Errorf("Got: %v", relativeFiles)
-		return
-	}
-
-	for i, expectedFile := range expected {
-		if relativeFiles[i] != expectedFile {
-			t.Errorf("Expected file %s, got %s", expectedFile, relativeFiles[i])
-		}
-	}
+	suite.Equal(expected, relativeFiles, "Files should match expected list with gitignore rules")
 }
 
-// TestGetSourceList_WithoutGitignore tests file discovery with gitignore rules disabled.
-func TestGetSourceList_WithoutGitignore(t *testing.T) {
-	tempDir := setupTestEnvironment(t)
-	defer os.RemoveAll(tempDir)
-
+// TestWithoutGitignore tests file discovery with gitignore rules disabled.
+func (suite *GetSourceListTestSuite) TestWithoutGitignore() {
 	options := &GetSourceListOptions{
 		RespectGitignore: false,
 		IncludeHidden:    false,
 	}
-	files, err := GetSourceList(tempDir, options)
-	if err != nil {
-		t.Fatalf("GetSourceList failed: %v", err)
-	}
+	files, err := GetSourceList(suite.tempDir, options)
+	suite.Require().NoError(err, "GetSourceList failed")
 
-	relativeFiles := getRelativeFiles(t, tempDir, files, true)
+	relativeFiles := suite.getRelativeFiles(files, true)
 
 	expected := []string{
 		"build/output.bin",
@@ -143,36 +125,20 @@ func TestGetSourceList_WithoutGitignore(t *testing.T) {
 	}
 	sort.Strings(expected)
 
-	if len(relativeFiles) != len(expected) {
-		t.Errorf("Expected %d files, got %d", len(expected), len(relativeFiles))
-		t.Errorf("Expected: %v", expected)
-		t.Errorf("Got: %v", relativeFiles)
-		return
-	}
-
-	for i, expectedFile := range expected {
-		if relativeFiles[i] != expectedFile {
-			t.Errorf("Expected file %s, got %s", expectedFile, relativeFiles[i])
-		}
-	}
+	suite.Equal(expected, relativeFiles, "Files should include gitignore-excluded files when RespectGitignore is false")
 }
 
-// TestGetSourceList_WithExtensionFilter tests file discovery with extension filtering.
-func TestGetSourceList_WithExtensionFilter(t *testing.T) {
-	tempDir := setupTestEnvironment(t)
-	defer os.RemoveAll(tempDir)
-
+// TestWithExtensionFilter tests file discovery with extension filtering.
+func (suite *GetSourceListTestSuite) TestWithExtensionFilter() {
 	options := &GetSourceListOptions{
 		RespectGitignore: true,
 		IncludeHidden:    false,
 		Extensions:       []string{".go"},
 	}
-	files, err := GetSourceList(tempDir, options)
-	if err != nil {
-		t.Fatalf("GetSourceList failed: %v", err)
-	}
+	files, err := GetSourceList(suite.tempDir, options)
+	suite.Require().NoError(err, "GetSourceList failed")
 
-	relativeFiles := getRelativeFiles(t, tempDir, files, false)
+	relativeFiles := suite.getRelativeFiles(files, false)
 
 	expected := []string{
 		"dir1/file3.go",
@@ -180,33 +146,17 @@ func TestGetSourceList_WithExtensionFilter(t *testing.T) {
 	}
 	sort.Strings(expected)
 
-	if len(relativeFiles) != len(expected) {
-		t.Errorf("Expected %d files, got %d", len(expected), len(relativeFiles))
-		t.Errorf("Expected: %v", expected)
-		t.Errorf("Got: %v", relativeFiles)
-		return
-	}
-
-	for i, expectedFile := range expected {
-		if relativeFiles[i] != expectedFile {
-			t.Errorf("Expected file %s, got %s", expectedFile, relativeFiles[i])
-		}
-	}
+	suite.Equal(expected, relativeFiles, "Should only return .go files when extension filter is applied")
 }
 
-// TestGetSourceList_WithHiddenFiles tests file discovery with hidden files included.
-func TestGetSourceList_WithHiddenFiles(t *testing.T) {
-	tempDir := setupTestEnvironment(t)
-	defer os.RemoveAll(tempDir)
-
+// TestWithHiddenFiles tests file discovery with hidden files included.
+func (suite *GetSourceListTestSuite) TestWithHiddenFiles() {
 	options := &GetSourceListOptions{
 		RespectGitignore: false,
 		IncludeHidden:    true,
 	}
-	files, err := GetSourceList(tempDir, options)
-	if err != nil {
-		t.Fatalf("GetSourceList failed: %v", err)
-	}
+	files, err := GetSourceList(suite.tempDir, options)
+	suite.Require().NoError(err, "GetSourceList failed")
 
 	// Check if hidden files are included
 	var hasHiddenFile bool
@@ -217,36 +167,28 @@ func TestGetSourceList_WithHiddenFiles(t *testing.T) {
 		}
 	}
 
-	if !hasHiddenFile {
-		t.Error("Expected hidden files to be included when IncludeHidden is true")
-	}
+	suite.True(hasHiddenFile, "Hidden files should be included when IncludeHidden is true")
 }
 
-// TestGetSourceList_WithCustomGitignoreFilePath tests file discovery with custom gitignore file path.
-func TestGetSourceList_WithCustomGitignoreFilePath(t *testing.T) {
-	tempDir := setupTestEnvironment(t)
-	defer os.RemoveAll(tempDir)
-
+// TestWithCustomGitignoreFilePath tests file discovery with custom gitignore file path.
+func (suite *GetSourceListTestSuite) TestWithCustomGitignoreFilePath() {
 	// Create a custom gitignore file with different rules
 	customGitignoreContent := `*.txt
 dir2/
 `
-	customGitignorePath := filepath.Join(tempDir, "custom.gitignore")
-	if err := os.WriteFile(customGitignorePath, []byte(customGitignoreContent), 0644); err != nil {
-		t.Fatalf("Failed to create custom .gitignore: %v", err)
-	}
+	customGitignorePath := filepath.Join(suite.tempDir, "custom.gitignore")
+	err := os.WriteFile(customGitignorePath, []byte(customGitignoreContent), 0644)
+	suite.Require().NoError(err, "Failed to create custom .gitignore")
 
 	options := &GetSourceListOptions{
 		RespectGitignore:  true,
 		IncludeHidden:     false,
 		GitignoreFilePath: customGitignorePath,
 	}
-	files, err := GetSourceList(tempDir, options)
-	if err != nil {
-		t.Fatalf("GetSourceList failed: %v", err)
-	}
+	files, err := GetSourceList(suite.tempDir, options)
+	suite.Require().NoError(err, "GetSourceList failed")
 
-	relativeFiles := getRelativeFiles(t, tempDir, files, true)
+	relativeFiles := suite.getRelativeFiles(files, true)
 
 	// With custom gitignore rules: *.txt and dir2/ should be ignored
 	// So we should only have .go files, node_modules/, and build/ files
@@ -259,25 +201,11 @@ dir2/
 	}
 	sort.Strings(expected)
 
-	if len(relativeFiles) != len(expected) {
-		t.Errorf("Expected %d files, got %d", len(expected), len(relativeFiles))
-		t.Errorf("Expected: %v", expected)
-		t.Errorf("Got: %v", relativeFiles)
-		return
-	}
-
-	for i, expectedFile := range expected {
-		if relativeFiles[i] != expectedFile {
-			t.Errorf("Expected file %s, got %s", expectedFile, relativeFiles[i])
-		}
-	}
+	suite.Equal(expected, relativeFiles, "Should respect custom gitignore file rules")
 }
 
-// TestGetSourceList_WithNonExistentGitignoreFilePath tests graceful handling of non-existent gitignore file.
-func TestGetSourceList_WithNonExistentGitignoreFilePath(t *testing.T) {
-	tempDir := setupTestEnvironment(t)
-	defer os.RemoveAll(tempDir)
-
+// TestWithNonExistentGitignoreFilePath tests graceful handling of non-existent gitignore file.
+func (suite *GetSourceListTestSuite) TestWithNonExistentGitignoreFilePath() {
 	options := &GetSourceListOptions{
 		RespectGitignore:  true,
 		IncludeHidden:     false,
@@ -285,38 +213,28 @@ func TestGetSourceList_WithNonExistentGitignoreFilePath(t *testing.T) {
 	}
 
 	// Should not fail, just ignore the gitignore rules
-	files, err := GetSourceList(tempDir, options)
-	if err != nil {
-		t.Fatalf("GetSourceList failed: %v", err)
-	}
+	files, err := GetSourceList(suite.tempDir, options)
+	suite.Require().NoError(err, "GetSourceList should not fail with non-existent gitignore file")
 
-	relativeFiles := getRelativeFiles(t, tempDir, files, true)
+	relativeFiles := suite.getRelativeFiles(files, true)
 
 	// Should have at least the non-hidden files
-	if len(relativeFiles) < 6 { // file1.go, dir1/file3.go, dir1/file4.txt, dir2/file5.js, node_modules/package.json, build/output.bin
-		t.Errorf("Expected at least 6 files when gitignore file doesn't exist, got %d: %v", len(relativeFiles), relativeFiles)
-	}
+	suite.GreaterOrEqual(len(relativeFiles), 6,
+		"Should have at least 6 files when gitignore file doesn't exist: %v", relativeFiles)
 }
 
-// TestGetSourceList_WithNilOptions tests that GetSourceList works with nil options (using defaults).
-func TestGetSourceList_WithNilOptions(t *testing.T) {
-	tempDir := setupTestEnvironment(t)
-	defer os.RemoveAll(tempDir)
-
+// TestWithNilOptions tests that GetSourceList works with nil options (using defaults).
+func (suite *GetSourceListTestSuite) TestWithNilOptions() {
 	// Test with nil options - should use defaults
-	files, err := GetSourceList(tempDir, nil)
-	if err != nil {
-		t.Fatalf("GetSourceList failed: %v", err)
-	}
+	files, err := GetSourceList(suite.tempDir, nil)
+	suite.Require().NoError(err, "GetSourceList failed with nil options")
 
-	if len(files) == 0 {
-		t.Error("Expected to find files when using default options")
-	}
+	suite.NotEmpty(files, "Should find files when using default options")
 
-	relativeFiles := getRelativeFiles(t, tempDir, files, false)
+	relativeFiles := suite.getRelativeFiles(files, false)
 
 	// With default options (RespectGitignore=true, IncludeHidden=false),
-	// should behave same as TestGetSourceList_WithGitignore
+	// should behave same as TestWithGitignore
 	expected := []string{
 		"dir1/file3.go",
 		"dir1/file4.txt",
@@ -326,29 +244,20 @@ func TestGetSourceList_WithNilOptions(t *testing.T) {
 	}
 	sort.Strings(expected)
 
-	if len(relativeFiles) != len(expected) {
-		t.Errorf("Expected %d files, got %d", len(expected), len(relativeFiles))
-		t.Errorf("Expected: %v", expected)
-		t.Errorf("Got: %v", relativeFiles)
-	}
+	suite.Equal(expected, relativeFiles, "Nil options should use default behavior")
 }
 
-// TestGetSourceList_WithMultipleExtensions tests file discovery with multiple extension filters.
-func TestGetSourceList_WithMultipleExtensions(t *testing.T) {
-	tempDir := setupTestEnvironment(t)
-	defer os.RemoveAll(tempDir)
-
+// TestWithMultipleExtensions tests file discovery with multiple extension filters.
+func (suite *GetSourceListTestSuite) TestWithMultipleExtensions() {
 	options := &GetSourceListOptions{
 		RespectGitignore: true,
 		IncludeHidden:    false,
 		Extensions:       []string{".go", ".js"},
 	}
-	files, err := GetSourceList(tempDir, options)
-	if err != nil {
-		t.Fatalf("GetSourceList failed: %v", err)
-	}
+	files, err := GetSourceList(suite.tempDir, options)
+	suite.Require().NoError(err, "GetSourceList failed")
 
-	relativeFiles := getRelativeFiles(t, tempDir, files, false)
+	relativeFiles := suite.getRelativeFiles(files, false)
 
 	expected := []string{
 		"dir1/file3.go",
@@ -357,38 +266,43 @@ func TestGetSourceList_WithMultipleExtensions(t *testing.T) {
 	}
 	sort.Strings(expected)
 
-	if len(relativeFiles) != len(expected) {
-		t.Errorf("Expected %d files, got %d", len(expected), len(relativeFiles))
-		t.Errorf("Expected: %v", expected)
-		t.Errorf("Got: %v", relativeFiles)
-		return
-	}
+	suite.Equal(expected, relativeFiles, "Should return files with .go and .js extensions only")
+}
 
-	for i, expectedFile := range expected {
-		if relativeFiles[i] != expectedFile {
-			t.Errorf("Expected file %s, got %s", expectedFile, relativeFiles[i])
-		}
+// EmptyDirectoryTestSuite tests behavior with an empty directory.
+type EmptyDirectoryTestSuite struct {
+	suite.Suite
+	tempDir string
+}
+
+// SetupTest creates an empty directory for testing.
+func (suite *EmptyDirectoryTestSuite) SetupTest() {
+	tempDir, err := os.MkdirTemp("", "test_empty_dir")
+	suite.Require().NoError(err, "Failed to create temp dir")
+	suite.tempDir = tempDir
+}
+
+// TearDownTest cleans up the test directory.
+func (suite *EmptyDirectoryTestSuite) TearDownTest() {
+	if suite.tempDir != "" {
+		os.RemoveAll(suite.tempDir)
 	}
 }
 
-// TestGetSourceList_WithEmptyDirectory tests behavior with an empty directory.
-func TestGetSourceList_WithEmptyDirectory(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "test_empty_dir")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
+// TestEmptyDirectory tests that empty directories are handled correctly.
+func (suite *EmptyDirectoryTestSuite) TestEmptyDirectory() {
 	options := &GetSourceListOptions{
 		RespectGitignore: true,
 		IncludeHidden:    false,
 	}
-	files, err := GetSourceList(tempDir, options)
-	if err != nil {
-		t.Fatalf("GetSourceList failed: %v", err)
-	}
+	files, err := GetSourceList(suite.tempDir, options)
+	suite.Require().NoError(err, "GetSourceList failed")
 
-	if len(files) != 0 {
-		t.Errorf("Expected 0 files in empty directory, got %d: %v", len(files), files)
-	}
+	suite.Empty(files, "Empty directory should return no files")
+}
+
+// TestGetSourceList runs all the test suites.
+func TestGetSourceList(t *testing.T) {
+	suite.Run(t, new(GetSourceListTestSuite))
+	suite.Run(t, new(EmptyDirectoryTestSuite))
 }

@@ -51,6 +51,7 @@ linters:
             - $gostd
             - github.com/sashabaranov/go-openai
             - github.com/sabhiram/go-gitignore
+            - github.com/stretchr/testify
     errorlint:
       errorf: true
       errorf-multi: true
