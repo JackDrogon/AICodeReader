@@ -31,19 +31,39 @@ bin:
 
 .PHONY: lint
 ## lint : Lint codespace
-# TODO(Drogon): add golang lint
 lint:
-	$(V)golangci-lint run
+	$(V)golangci-lint run --config .golangci.yml
 
 .PHONY: fmt
 ## fmt : Format all code
 fmt:
 	$(V)go fmt ./...
 
+.PHONY: ci
+## ci : Run all CI checks locally
+ci: check-fmt lint test build
+	@echo "All CI checks passed!"
+
 .PHONY: test
 ## test : Run test
 test:
-	$(V)go test (shell go list ./...) | grep -F -v '[no test files]'
+	$(V)go test -v -race -covermode=atomic -coverprofile=coverage.out ./...
+
+.PHONY: test-coverage
+## test-coverage : Run test with coverage report
+test-coverage: test
+	$(V)go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
+
+.PHONY: check-fmt
+## check-fmt : Check code formatting
+check-fmt:
+	$(V)if [ "$$(gofmt -s -l . | wc -l)" -gt 0 ]; then \
+		echo "The following files are not formatted correctly:"; \
+		gofmt -s -l .; \
+		echo "Please run 'make fmt' to format your code."; \
+		exit 1; \
+	fi
 
 .PHONY: cloc
 ## cloc : Count lines of code
@@ -54,6 +74,11 @@ cloc:
 ## todos : Print all todos
 todos:
 	$(V)grep -rnw . -e "TODO" | grep -v '^./pkg/rpc/thrift' | grep -v '^./.git'
+
+.PHONY: check-env
+## check-env : Check development environment
+check-env:
+	$(V)bash scripts/check-dev-env.sh
 
 .PHONY: help
 ## help : Print help message
