@@ -377,3 +377,232 @@ func TestGetSourceList(t *testing.T) {
 	suite.Run(t, new(GetSourceListTestSuite))
 	suite.Run(t, new(EmptyDirectoryTestSuite))
 }
+
+// FuzzGetSourceList implements fuzz testing for GetSourceList function
+// to test robustness with various random inputs and edge cases.
+func FuzzGetSourceList(f *testing.F) {
+	// Create a controlled temporary directory for safer fuzzing
+	tempDir, err := os.MkdirTemp("", "fuzz_test_controlled")
+	if err != nil {
+		f.Fatal("Failed to create temp dir for fuzz test:", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create some test files in the controlled environment
+	testFiles := []string{"test.go", "test.txt", ".hidden", "sub/test.js"}
+	for _, file := range testFiles {
+		filePath := filepath.Join(tempDir, file)
+		os.MkdirAll(filepath.Dir(filePath), 0755)
+		os.WriteFile(filePath, []byte("test"), 0644)
+	}
+
+	// Add seed data for fuzzing - use relative paths within our controlled directory
+	f.Add("test_subdir", true, false, "")
+	f.Add("nonexistent", false, true, ".go")
+	f.Add("", true, false, ".txt")
+	f.Add(".", false, false, "")
+	f.Add("sub", true, true, ".js")
+
+	f.Fuzz(func(t *testing.T, relativeDir string, respectGitignore bool, includeHidden bool, extension string) {
+		// Sanitize and construct safe directory path within our controlled temp directory
+		// Avoid dangerous paths like "../", "/", etc.
+		sanitizedRelDir := filepath.Clean(relativeDir)
+		if strings.Contains(sanitizedRelDir, "..") ||
+			strings.HasPrefix(sanitizedRelDir, "/") ||
+			len(sanitizedRelDir) > 100 { // Limit path length
+			// Use a safe default instead of dangerous paths
+			sanitizedRelDir = "safe_subdir"
+		}
+
+		var testDir string
+		if sanitizedRelDir == "" || sanitizedRelDir == "." {
+			testDir = tempDir
+		} else {
+			testDir = filepath.Join(tempDir, sanitizedRelDir)
+		}
+
+		// Create test options from fuzz inputs
+		var extensions []string
+		if extension != "" && len(extension) <= 10 { // Limit extension length
+			extensions = []string{extension}
+		}
+
+		options := &GetSourceListOptions{
+			RespectGitignore: respectGitignore,
+			IncludeHidden:    includeHidden,
+			Extensions:       extensions,
+		}
+
+		// Test that GetSourceList doesn't panic with any input
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("GetSourceList panicked with dir=%q, options=%+v: %v", testDir, options, r)
+			}
+		}()
+
+		// Call GetSourceList - should not panic
+		files, err := GetSourceList(testDir, options)
+
+		// Basic invariant checks
+		if err == nil {
+			// If no error, files should not be nil
+			if files == nil {
+				t.Errorf("GetSourceList returned nil files slice without error for dir=%q", testDir)
+			}
+
+			// Limit the number of files we check for performance
+			maxFilesToCheck := 100
+			filesToCheck := files
+			if len(files) > maxFilesToCheck {
+				filesToCheck = files[:maxFilesToCheck]
+			}
+
+			// All returned files should be valid paths
+			for _, file := range filesToCheck {
+				if file == "" {
+					t.Errorf("GetSourceList returned empty file path for dir=%q", testDir)
+				}
+
+				// If extension filter is specified, check that files match
+				if len(extensions) > 0 {
+					fileExt := filepath.Ext(file)
+					found := false
+					for _, ext := range extensions {
+						if fileExt == ext {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("GetSourceList returned file %q with extension %q, but only %v extensions were requested",
+							file, fileExt, extensions)
+					}
+				}
+			}
+		}
+	})
+}
+
+// FuzzGetSourceListWithSpecialChars tests GetSourceList with various special characters
+// in directory paths and file extensions.
+func FuzzGetSourceListWithSpecialChars(f *testing.F) {
+	// Add seed data with special characters
+	f.Add("test\x00dir", ".go\x00")
+	f.Add("dir\nwith\nnewlines", ".txt\n")
+	f.Add("dir\twith\ttabs", ".js\t")
+	f.Add("dir with spaces", ".py ")
+	f.Add("dir-with-unicode-测试", ".测试")
+	f.Add("dir/with/../../paths", "../.go")
+	f.Add("dir\\with\\backslashes", ".exe\\")
+	f.Add("very"+strings.Repeat("long", 100)+"path", ".verylongextension")
+
+	f.Fuzz(func(t *testing.T, dir string, extension string) {
+		// Create options with potentially problematic extension
+		var extensions []string
+		if extension != "" {
+			extensions = []string{extension}
+		}
+
+		options := &GetSourceListOptions{
+			RespectGitignore: true,
+			IncludeHidden:    false,
+			Extensions:       extensions,
+		}
+
+		// Test that function doesn't panic with special characters
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("GetSourceList panicked with special chars dir=%q, ext=%q: %v", dir, extension, r)
+			}
+		}()
+
+		// Call function - main goal is to ensure no panic
+		_, err := GetSourceList(dir, options)
+
+		// We don't check the error here since many special character paths
+		// are expected to fail - we just want to ensure no panic occurs
+		_ = err
+	})
+}
+
+// FuzzGetSourceListOptions tests various combinations of GetSourceListOptions
+// to ensure robustness with different option configurations.
+func FuzzGetSourceListOptions(f *testing.F) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "fuzz_test")
+	if err != nil {
+		f.Fatal("Failed to create temp dir for fuzz test:", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create some test files
+	testFiles := []string{"test.go", "test.txt", ".hidden", "dir/nested.js"}
+	for _, file := range testFiles {
+		filePath := filepath.Join(tempDir, file)
+		os.MkdirAll(filepath.Dir(filePath), 0755)
+		os.WriteFile(filePath, []byte("test"), 0644)
+	}
+
+	// Add seed data for options fuzzing
+	f.Add(true, false, 1, "/nonexistent/.gitignore")
+	f.Add(false, true, 0, "")
+	f.Add(true, true, 2, tempDir+"/.gitignore")
+	f.Add(false, false, 5, "/dev/null")
+
+	f.Fuzz(func(t *testing.T, respectGitignore bool, includeHidden bool, numExtensions int, gitignorePath string) {
+		// Generate extensions based on numExtensions
+		var extensions []string
+		extOptions := []string{".go", ".txt", ".js", ".py", ".java", ".cpp", ".h", ".md", ".json", ".xml"}
+		for i := 0; i < numExtensions && i < len(extOptions); i++ {
+			extensions = append(extensions, extOptions[i])
+		}
+
+		options := &GetSourceListOptions{
+			RespectGitignore:  respectGitignore,
+			IncludeHidden:     includeHidden,
+			Extensions:        extensions,
+			GitignoreFilePath: gitignorePath,
+		}
+
+		// Test that function doesn't panic with various option combinations
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("GetSourceList panicked with options=%+v: %v", options, r)
+			}
+		}()
+
+		files, err := GetSourceList(tempDir, options)
+
+		// Basic checks when no error occurs
+		if err == nil {
+			if files == nil {
+				t.Errorf("GetSourceList returned nil files slice without error")
+			}
+
+			// Check extension filtering
+			for _, file := range files {
+				if len(extensions) > 0 {
+					ext := filepath.Ext(file)
+					found := false
+					for _, validExt := range extensions {
+						if ext == validExt {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("File %q has extension %q but only %v were requested", file, ext, extensions)
+					}
+				}
+
+				// Check hidden file handling
+				if !includeHidden {
+					basename := filepath.Base(file)
+					if strings.HasPrefix(basename, ".") && basename != ".." && basename != "." {
+						t.Errorf("Hidden file %q returned when IncludeHidden=false", file)
+					}
+				}
+			}
+		}
+	})
+}
