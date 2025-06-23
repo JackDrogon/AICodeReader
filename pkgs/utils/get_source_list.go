@@ -2,6 +2,7 @@ package utils
 
 import (
 	"io/fs"
+	"log"
 	"path/filepath"
 	"strings"
 
@@ -91,32 +92,23 @@ func GetSourceList(dir string, options *GetSourceListOptions) ([]string, error) 
 	}
 
 	var gitIgnore *ignore.GitIgnore
-	var err error
+	var extSet map[string]struct{}
+
+	// Precompute extension set if needed
+	if len(options.Extensions) > 0 {
+		extSet = extensionSet(options.Extensions)
+	}
 
 	// Load .gitignore rules if requested
 	if options.RespectGitignore {
-		var gitignorePath string
-
-		if options.GitignoreFilePath != "" {
-			// Use custom gitignore file path
-			gitignorePath = options.GitignoreFilePath
-		} else {
-			// Use default .gitignore in the target directory
-			gitignorePath = filepath.Join(dir, ".gitignore")
-		}
-
-		gitIgnore, err = ignore.CompileIgnoreFile(gitignorePath)
-		if err != nil {
-			// If .gitignore file doesn't exist or can't be read, create an empty GitIgnore
-			gitIgnore = ignore.CompileIgnoreLines()
-		}
+		gitIgnore = loadGitignore(dir, options.GitignoreFilePath)
 	}
 
-	files := make([]string, 0, 100) // Preallocate slice for better performance
+	files := make([]string, 0, 512) // Preallocate larger initial capacity
 
-	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
 
 		// Skip if it's a directory
@@ -134,9 +126,9 @@ func GetSourceList(dir string, options *GetSourceListOptions) ([]string, error) 
 		}
 
 		// Check file extension if specified
-		if len(options.Extensions) > 0 {
+		if extSet != nil {
 			ext := filepath.Ext(path)
-			if !contains(options.Extensions, ext) {
+			if _, exists := extSet[ext]; !exists {
 				return nil
 			}
 		}
@@ -144,12 +136,8 @@ func GetSourceList(dir string, options *GetSourceListOptions) ([]string, error) 
 		// Check against gitignore rules if enabled
 		if gitIgnore != nil {
 			// Convert to relative path from the directory
-			relPath, err := filepath.Rel(dir, path)
-			if err != nil {
-				return err
-			}
-			// Normalize path separators for cross-platform compatibility
-			relPath = filepath.ToSlash(relPath)
+			relPath, _ := filepath.Rel(dir, path)
+			relPath = filepath.ToSlash(relPath) // Normalize to slash separators
 
 			if gitIgnore.MatchesPath(relPath) {
 				return nil
@@ -163,13 +151,27 @@ func GetSourceList(dir string, options *GetSourceListOptions) ([]string, error) 
 	return files, err
 }
 
-// contains checks if a slice contains a specific string.
-// This is a utility function used internally by GetSourceList.
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
+// loadGitignore handles gitignore file loading with error logging.
+func loadGitignore(dir, customPath string) *ignore.GitIgnore {
+	gitignorePath := customPath
+	if gitignorePath == "" {
+		gitignorePath = filepath.Join(dir, ".gitignore")
 	}
-	return false
+
+	gitIgnore, err := ignore.CompileIgnoreFile(gitignorePath)
+	if err != nil {
+		// Log error but continue with empty rules
+		log.Printf("WARNING: Could not load gitignore file at %q: %v", gitignorePath, err)
+		return ignore.CompileIgnoreLines()
+	}
+	return gitIgnore
+}
+
+// extensionSet creates a map for fast extension lookups.
+func extensionSet(extensions []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(extensions))
+	for _, ext := range extensions {
+		set[ext] = struct{}{}
+	}
+	return set
 }
