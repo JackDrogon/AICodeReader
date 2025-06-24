@@ -128,12 +128,12 @@ func (suite *GetSourceListTestSuite) TestWithoutGitignore() {
 	suite.Equal(expected, relativeFiles, "Files should include gitignore-excluded files when RespectGitignore is false")
 }
 
-// TestWithExtensionFilter tests file discovery with extension filtering.
-func (suite *GetSourceListTestSuite) TestWithExtensionFilter() {
+// TestWithIncludePatterns tests file discovery with glob pattern filtering.
+func (suite *GetSourceListTestSuite) TestWithIncludePatterns() {
 	options := &GetSourceListOptions{
 		RespectGitignore: true,
 		IncludeHidden:    false,
-		Extensions:       []string{".go"},
+		IncludePatterns:  []string{"*.go"},
 	}
 	files, err := GetSourceList(suite.tempDir, options)
 	suite.Require().NoError(err, "GetSourceList failed")
@@ -146,7 +146,7 @@ func (suite *GetSourceListTestSuite) TestWithExtensionFilter() {
 	}
 	sort.Strings(expected)
 
-	suite.Equal(expected, relativeFiles, "Should only return .go files when extension filter is applied")
+	suite.Equal(expected, relativeFiles, "Should only return .go files when glob pattern filter is applied")
 }
 
 // TestWithHiddenFiles tests file discovery with hidden files included.
@@ -247,12 +247,12 @@ func (suite *GetSourceListTestSuite) TestWithNilOptions() {
 	suite.Equal(expected, relativeFiles, "Nil options should use default behavior")
 }
 
-// TestWithMultipleExtensions tests file discovery with multiple extension filters.
-func (suite *GetSourceListTestSuite) TestWithMultipleExtensions() {
+// TestWithMultipleIncludePatterns tests file discovery with multiple glob pattern filters.
+func (suite *GetSourceListTestSuite) TestWithMultipleIncludePatterns() {
 	options := &GetSourceListOptions{
 		RespectGitignore: true,
 		IncludeHidden:    false,
-		Extensions:       []string{".go", ".js"},
+		IncludePatterns:  []string{"*.go", "*.js"},
 	}
 	files, err := GetSourceList(suite.tempDir, options)
 	suite.Require().NoError(err, "GetSourceList failed")
@@ -266,7 +266,7 @@ func (suite *GetSourceListTestSuite) TestWithMultipleExtensions() {
 	}
 	sort.Strings(expected)
 
-	suite.Equal(expected, relativeFiles, "Should return files with .go and .js extensions only")
+	suite.Equal(expected, relativeFiles, "Should return files with .go and .js patterns only")
 }
 
 // EmptyDirectoryTestSuite tests behavior with an empty directory.
@@ -403,7 +403,7 @@ func FuzzGetSourceList(f *testing.F) {
 	f.Add(".", false, false, "")
 	f.Add("sub", true, true, ".js")
 
-	f.Fuzz(func(t *testing.T, relativeDir string, respectGitignore bool, includeHidden bool, extension string) {
+	f.Fuzz(func(t *testing.T, relativeDir string, respectGitignore bool, includeHidden bool, pattern string) {
 		// Sanitize and construct safe directory path within our controlled temp directory
 		// Avoid dangerous paths like "../", "/", etc.
 		sanitizedRelDir := filepath.Clean(relativeDir)
@@ -422,15 +422,15 @@ func FuzzGetSourceList(f *testing.F) {
 		}
 
 		// Create test options from fuzz inputs
-		var extensions []string
-		if extension != "" && len(extension) <= 10 { // Limit extension length
-			extensions = []string{extension}
+		var includePatterns []string
+		if pattern != "" && len(pattern) <= 10 { // Limit pattern length
+			includePatterns = []string{pattern}
 		}
 
 		options := &GetSourceListOptions{
 			RespectGitignore: respectGitignore,
 			IncludeHidden:    includeHidden,
-			Extensions:       extensions,
+			IncludePatterns:  includePatterns,
 		}
 
 		// Test that GetSourceList doesn't panic with any input
@@ -463,19 +463,19 @@ func FuzzGetSourceList(f *testing.F) {
 					t.Errorf("GetSourceList returned empty file path for dir=%q", testDir)
 				}
 
-				// If extension filter is specified, check that files match
-				if len(extensions) > 0 {
-					fileExt := filepath.Ext(file)
+				// If include patterns are specified, check that files match
+				if len(includePatterns) > 0 {
+					fileName := filepath.Base(file)
 					found := false
-					for _, ext := range extensions {
-						if fileExt == ext {
+					for _, pattern := range includePatterns {
+						if match, err := filepath.Match(pattern, fileName); err == nil && match {
 							found = true
 							break
 						}
 					}
 					if !found {
-						t.Errorf("GetSourceList returned file %q with extension %q, but only %v extensions were requested",
-							file, fileExt, extensions)
+						t.Errorf("GetSourceList returned file %q that doesn't match any of the patterns %v",
+							file, includePatterns)
 					}
 				}
 			}
@@ -496,23 +496,23 @@ func FuzzGetSourceListWithSpecialChars(f *testing.F) {
 	f.Add("dir\\with\\backslashes", ".exe\\")
 	f.Add("very"+strings.Repeat("long", 100)+"path", ".verylongextension")
 
-	f.Fuzz(func(t *testing.T, dir string, extension string) {
-		// Create options with potentially problematic extension
-		var extensions []string
-		if extension != "" {
-			extensions = []string{extension}
+	f.Fuzz(func(t *testing.T, dir string, pattern string) {
+		// Create options with potentially problematic pattern
+		var includePatterns []string
+		if pattern != "" {
+			includePatterns = []string{pattern}
 		}
 
 		options := &GetSourceListOptions{
 			RespectGitignore: true,
 			IncludeHidden:    false,
-			Extensions:       extensions,
+			IncludePatterns:  includePatterns,
 		}
 
 		// Test that function doesn't panic with special characters
 		defer func() {
 			if r := recover(); r != nil {
-				t.Errorf("GetSourceList panicked with special chars dir=%q, ext=%q: %v", dir, extension, r)
+				t.Errorf("GetSourceList panicked with special chars dir=%q, pattern=%q: %v", dir, pattern, r)
 			}
 		}()
 
@@ -549,18 +549,18 @@ func FuzzGetSourceListOptions(f *testing.F) {
 	f.Add(true, true, 2, tempDir+"/.gitignore")
 	f.Add(false, false, 5, "/dev/null")
 
-	f.Fuzz(func(t *testing.T, respectGitignore bool, includeHidden bool, numExtensions int, gitignorePath string) {
-		// Generate extensions based on numExtensions
-		var extensions []string
-		extOptions := []string{".go", ".txt", ".js", ".py", ".java", ".cpp", ".h", ".md", ".json", ".xml"}
-		for i := 0; i < numExtensions && i < len(extOptions); i++ {
-			extensions = append(extensions, extOptions[i])
+	f.Fuzz(func(t *testing.T, respectGitignore bool, includeHidden bool, numPatterns int, gitignorePath string) {
+		// Generate include patterns based on numPatterns
+		var includePatterns []string
+		patternOptions := []string{"*.go", "*.txt", "*.js", "*.py", "*.java", "*.cpp", "*.h", "*.md", "*.json", "*.xml"}
+		for i := 0; i < numPatterns && i < len(patternOptions); i++ {
+			includePatterns = append(includePatterns, patternOptions[i])
 		}
 
 		options := &GetSourceListOptions{
 			RespectGitignore:  respectGitignore,
 			IncludeHidden:     includeHidden,
-			Extensions:        extensions,
+			IncludePatterns:   includePatterns,
 			GitignoreFilePath: gitignorePath,
 		}
 
@@ -579,19 +579,19 @@ func FuzzGetSourceListOptions(f *testing.F) {
 				t.Errorf("GetSourceList returned nil files slice without error")
 			}
 
-			// Check extension filtering
+			// Check pattern filtering
 			for _, file := range files {
-				if len(extensions) > 0 {
-					ext := filepath.Ext(file)
+				if len(includePatterns) > 0 {
+					fileName := filepath.Base(file)
 					found := false
-					for _, validExt := range extensions {
-						if ext == validExt {
+					for _, pattern := range includePatterns {
+						if match, err := filepath.Match(pattern, fileName); err == nil && match {
 							found = true
 							break
 						}
 					}
 					if !found {
-						t.Errorf("File %q has extension %q but only %v were requested", file, ext, extensions)
+						t.Errorf("File %q doesn't match any of the patterns %v", file, includePatterns)
 					}
 				}
 
