@@ -23,11 +23,15 @@ type GetSourceListOptions struct {
 	// Note: .git directories are always excluded regardless of this setting.
 	IncludeHidden bool
 
-	// Extensions specifies a list of file extensions to include in the results.
-	// Only files with extensions matching this list will be returned.
-	// Extensions should include the dot prefix (e.g., []string{".go", ".js", ".py"}).
-	// If empty or nil, all file extensions will be included (subject to other filters).
-	Extensions []string
+	// IncludePatterns specifies a list of glob patterns to match file names.
+	// Only files whose names match at least one of these patterns will be returned.
+	// Patterns should follow glob syntax (e.g., []string{"*.go", "*.js", "test_*.py"}).
+	// If empty or nil, all files will be included (subject to other filters).
+	// Examples:
+	//   - "*.go" matches all Go files
+	//   - "test_*" matches files starting with "test_"
+	//   - "*.{js,ts}" can be specified as separate patterns: []string{"*.js", "*.ts"}
+	IncludePatterns []string
 
 	// GitignoreFilePath specifies a custom path to a .gitignore file.
 	// When RespectGitignore is true:
@@ -40,12 +44,12 @@ type GetSourceListOptions struct {
 
 // GetSourceList recursively scans a directory and returns a list of file paths
 // that match the specified criteria. It provides flexible filtering options
-// including gitignore support, file extension filtering, and hidden file handling.
+// including gitignore support, glob pattern filtering, and hidden file handling.
 //
 // Parameters:
 //   - dir: The root directory path to scan. Can be absolute or relative path.
 //   - options: Configuration options for filtering behavior. If nil, uses default settings:
-//     RespectGitignore=true, IncludeHidden=false, Extensions=nil, GitignoreFilePath=""
+//     RespectGitignore=true, IncludeHidden=false, IncludePatterns=nil, GitignoreFilePath=""
 //
 // Returns:
 //   - []string: A slice of file paths that match the specified criteria.
@@ -56,7 +60,7 @@ type GetSourceListOptions struct {
 // Behavior:
 //   - Always excludes .git directories from traversal for performance
 //   - Respects gitignore rules when RespectGitignore=true
-//   - Filters by file extensions when Extensions is specified
+//   - Filters by glob patterns when IncludePatterns is specified
 //   - Filters hidden files when IncludeHidden=false
 //   - Returns empty slice (not nil) when no files match criteria
 //
@@ -65,7 +69,7 @@ type GetSourceListOptions struct {
 //	// Get all Go files respecting .gitignore
 //	options := &GetSourceListOptions{
 //		RespectGitignore: true,
-//		Extensions:       []string{".go"},
+//		IncludePatterns:  []string{"*.go"},
 //	}
 //	files, err := GetSourceList("./src", options)
 //
@@ -76,11 +80,11 @@ type GetSourceListOptions struct {
 //	}
 //	files, err := GetSourceList(".", options)
 //
-//	// Use custom gitignore file
+//	// Use custom gitignore file with multiple patterns
 //	options := &GetSourceListOptions{
 //		RespectGitignore:  true,
 //		GitignoreFilePath: "/path/to/custom/.gitignore",
-//		Extensions:        []string{".js", ".ts"},
+//		IncludePatterns:   []string{"*.js", "*.ts", "test_*.py"},
 //	}
 //	files, err := GetSourceList("./project", options)
 func GetSourceList(dir string, options *GetSourceListOptions) ([]string, error) {
@@ -92,11 +96,13 @@ func GetSourceList(dir string, options *GetSourceListOptions) ([]string, error) 
 	}
 
 	var gitIgnore *ignore.GitIgnore
-	var extSet map[string]struct{}
+	var includePatterns []string
 
-	// Precompute extension set if needed
-	if len(options.Extensions) > 0 {
-		extSet = extensionSet(options.Extensions)
+	// Store include patterns if specified
+	if len(options.IncludePatterns) > 0 {
+		includePatterns = options.IncludePatterns
+	} else {
+		includePatterns = []string{"*"}
 	}
 
 	// Load .gitignore rules if requested
@@ -125,12 +131,17 @@ func GetSourceList(dir string, options *GetSourceListOptions) ([]string, error) 
 			return nil
 		}
 
-		// Check file extension if specified
-		if extSet != nil {
-			ext := filepath.Ext(path)
-			if _, exists := extSet[ext]; !exists {
-				return nil
+		// Check file against include patterns if specified
+		fileName := d.Name()
+		matched := false
+		for _, pattern := range includePatterns {
+			if match, err := filepath.Match(pattern, fileName); err == nil && match {
+				matched = true
+				break
 			}
+		}
+		if !matched {
+			return nil
 		}
 
 		// Check against gitignore rules if enabled
@@ -165,13 +176,4 @@ func loadGitignore(dir, customPath string) *ignore.GitIgnore {
 		return ignore.CompileIgnoreLines()
 	}
 	return gitIgnore
-}
-
-// extensionSet creates a map for fast extension lookups.
-func extensionSet(extensions []string) map[string]struct{} {
-	set := make(map[string]struct{}, len(extensions))
-	for _, ext := range extensions {
-		set[ext] = struct{}{}
-	}
-	return set
 }
